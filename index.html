@@ -1,335 +1,1169 @@
-<!doctype html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Goachat — Colis et achats France ↔ Afrique de l'Ouest</title>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
-  .display-font { font-family: 'Fraunces', serif; }
-  .body-font { font-family: 'Inter', sans-serif; }
-  .tracking-font { font-family: 'JetBrains Mono', monospace; }
-  .perforated {
-    background-image: radial-gradient(circle, #F6F1E7 3px, transparent 3.5px);
-    background-size: 14px 14px;
-    background-position: -7px -7px;
-  }
-  @keyframes flyAlong {
-    0% { left: 0%; opacity: 0; }
-    10% { opacity: 1; }
-    90% { opacity: 1; }
-    100% { left: 96%; opacity: 0; }
-  }
-  .plane-anim { animation: flyAlong 3.5s ease-in-out infinite; }
-  @media (prefers-reduced-motion: reduce) {
-    .plane-anim { animation: none; left: 45%; opacity: 1; }
-  }
-</style>
-</head>
-<body>
-<div id="root"></div>
-<script>
-  window.onerror = function (msg, url, line, col, error) {
-    document.getElementById('root').innerHTML =
-      '<pre style="white-space:pre-wrap;padding:20px;color:#A63D40;font-family:monospace;font-size:14px;">' +
-      'Erreur JS : ' + msg + '\nLigne : ' + line + '\n' + (error && error.stack ? error.stack : '') +
-      '</pre>';
-  };
-</script>
-<script type="text/babel" data-presets="react">
-const { useState, useMemo } = React;
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import {
+  Package,
+  Send,
+  Search,
+  Lock,
+  ChevronDown,
+  Copy,
+  Check,
+  Loader2,
+  RefreshCw,
+  AlertCircle,
+  Inbox,
+  FileText,
+  CreditCard,
+  ShoppingCart,
+  Archive,
+  Truck,
+  ShieldCheck,
+  PackageCheck,
+  Globe,
+  ArrowRight,
+  ArrowLeft,
+} from "lucide-react";
 
-// ---- Icônes simples (dessinées à la main, pas de dépendance externe) ----
-const Icon = ({ children, size = 18, style }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
-    {children}
-  </svg>
-);
-const Package = (p) => <Icon {...p}><rect x="3" y="8" width="18" height="13" rx="1.5"/><path d="M3 8l9-5 9 5"/><line x1="12" y1="8" x2="12" y2="21"/></Icon>;
-const ShoppingBag = (p) => <Icon {...p}><path d="M6 8h12l-1 12H7L6 8z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></Icon>;
-const Plane = (p) => <Icon {...p}><path d="M2 12l19-8-6 8 6 8-19-8z"/></Icon>;
-const MapPin = (p) => <Icon {...p}><path d="M12 21s7-6.5 7-11a7 7 0 1 0-14 0c0 4.5 7 11 7 11z"/><circle cx="12" cy="10" r="2.5"/></Icon>;
-const Phone = (p) => <Icon {...p}><path d="M5 4h4l1.5 4-2 1.5a12 12 0 0 0 5 5l1.5-2 4 1.5v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z"/></Icon>;
-const MessageCircle = (p) => <Icon {...p}><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5 8.4 8.4 0 0 1-4-1L3 20l1.3-4A8.4 8.4 0 0 1 3.5 11.5 8.5 8.5 0 0 1 12 3a8.5 8.5 0 0 1 9 8.5z"/></Icon>;
-const Check = (p) => <Icon {...p}><polyline points="20 6 9 17 4 12"/></Icon>;
-const ArrowRight = (p) => <Icon {...p}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></Icon>;
-const User = (p) => <Icon {...p}><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></Icon>;
-const LinkIcon = (p) => <Icon {...p}><path d="M9 15l6-6"/><path d="M11 5l1-1a3.5 3.5 0 0 1 5 5l-1 1"/><path d="M13 19l-1 1a3.5 3.5 0 0 1-5-5l1-1"/></Icon>;
+const C = {
+  ink: "#16223B",
+  inkSoft: "#5B6478",
+  paper: "#F1F2ED",
+  paperAlt: "#E8E9E2",
+  card: "#FBFBF9",
+  amber: "#E2A63B",
+  amberTint: "#FBF2E1",
+  rust: "#B5552B",
+  signal: "#2F7A63",
+  line: "#D7D8CE",
+  danger: "#B3401F",
+};
 
-// ---- Réglages ----
-const RATE_PER_KG_EUR = { ci: 10, benin: 10 }; // € / kg de transport
-const COMMISSION_RATE = 0.10; // 10% sur le montant de l'achat
-const XOF_PEG = 655.957; // parité fixe EUR -> FCFA
-const WHATSAPP_NUMBER = "33745655748"; // ton numéro WhatsApp Business
+const STORAGE_KEY = "goachat-requests-v2";
+const ADMIN_PASSWORD = "goachat2026";
+const XOF_PER_EUR = 655.957;
 
-const DESTINATIONS = [
-  { id: "ci", label: "Côte d'Ivoire", city: "Abidjan" },
-  { id: "benin", label: "Bénin", city: "Cotonou" },
+const DESTINATIONS = ["Côte d'Ivoire", "Bénin", "Autre destination"];
+const DEVISES = [
+  { key: "EUR", label: "Euro (€)" },
+  { key: "FCFA", label: "Franc CFA" },
 ];
 
-function eur(n) { return n.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fcfa(n) { return Math.round(n * XOF_PEG).toLocaleString("fr-FR"); }
+const SERVICE_TYPES = [
+  {
+    key: "achat",
+    label: "Achat sur un site européen",
+    short: "Achat Europe",
+    icon: Globe,
+    blurb: "Amazon, Shein, Vinted... On achète le produit et on vous l'envoie.",
+  },
+  {
+    key: "envoi_bj_fr",
+    label: "Envoi de colis : Bénin → France",
+    short: "Bénin → France",
+    icon: ArrowRight,
+    blurb: "Vous êtes au Bénin, on récupère et on expédie votre colis vers la France.",
+  },
+  {
+    key: "envoi_fr_bj",
+    label: "Envoi de colis : France → Bénin",
+    short: "France → Bénin",
+    icon: ArrowLeft,
+    blurb: "Vous êtes en France, on récupère et on expédie votre colis vers le Bénin.",
+  },
+];
 
-function TrackingTicker() {
-  const [n] = useState(() => Math.floor(100000 + Math.random() * 899999));
-  const year = new Date().getFullYear();
-  return <span className="tracking-font text-xs tracking-widest text-[#C9962C]">N° GC-{year}-{n}</span>;
+const STAGE_DEFS = {
+  nouvelle: { label: "Demande reçue", icon: Inbox, hint: "On a bien reçu votre demande, on l'étudie." },
+  devis: { label: "Devis envoyé", icon: FileText, hint: "Un devis vous a été envoyé sur WhatsApp ou par email." },
+  payee: { label: "Paiement confirmé", icon: CreditCard, hint: "Votre paiement est confirmé." },
+  commandee: { label: "Commande passée", icon: ShoppingCart, hint: "Le produit a été commandé." },
+  entrepot: { label: "Arrivé en entrepôt (France)", icon: Archive, hint: "Le produit est arrivé, préparation de l'envoi." },
+  collecte: { label: "Colis récupéré", icon: Archive, hint: "Votre colis a été récupéré et va être préparé pour l'envoi." },
+  expediee: { label: "Colis expédié", icon: Truck, hint: "Votre colis est en route." },
+  douane: { label: "Dédouanement", icon: ShieldCheck, hint: "Passage en douane à destination." },
+  livree: { label: "Livré", icon: PackageCheck, hint: "Livré. Merci d'avoir utilisé Goachat !" },
+};
+
+const STAGE_KEYS_ACHAT = ["nouvelle", "devis", "payee", "commandee", "entrepot", "expediee", "douane", "livree"];
+const STAGE_KEYS_ENVOI = ["nouvelle", "devis", "payee", "collecte", "expediee", "douane", "livree"];
+const FILTER_KEYS = ["nouvelle", "devis", "payee", "commandee", "entrepot", "collecte", "expediee", "douane", "livree"];
+
+function stagesForType(type) {
+  const keys = type === "achat" ? STAGE_KEYS_ACHAT : STAGE_KEYS_ENVOI;
+  return keys.map((k) => ({ key: k, ...STAGE_DEFS[k] }));
 }
 
-function Field({ label, children }) {
+function generateRef() {
+  const now = new Date();
+  const y = String(now.getFullYear()).slice(2);
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const rand = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `GC-${y}${m}${d}-${rand}`;
+}
+
+function formatDateTime(iso) {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    return (
+      d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" }) +
+      " à " +
+      d.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })
+    );
+  } catch {
+    return iso;
+  }
+}
+
+function formatAmount(amount, devise) {
+  const n = Number(amount) || 0;
+  if (devise === "FCFA") return `${Math.round(n).toLocaleString("fr-FR")} FCFA`;
+  return `${n.toLocaleString("fr-FR", { maximumFractionDigits: 2 })} €`;
+}
+
+function conversionHint(amount, devise) {
+  const n = Number(amount);
+  if (!n || n <= 0) return null;
+  const other = devise === "EUR" ? n * XOF_PER_EUR : n / XOF_PER_EUR;
+  const otherDevise = devise === "EUR" ? "FCFA" : "EUR";
+  return `≈ ${formatAmount(other, otherDevise)}`;
+}
+
+function summaryLine(r) {
+  if (r.type === "achat") return `Destination : ${r.destination}`;
+  return `Trajet : ${r.villeDepart || "?"} → ${r.villeArrivee || "?"}`;
+}
+
+async function loadAllRequests() {
+  try {
+    const res = await window.storage.get(STORAGE_KEY, true);
+    return res && res.value ? JSON.parse(res.value) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+async function saveAllRequests(list) {
+  await window.storage.set(STORAGE_KEY, JSON.stringify(list), true);
+}
+
+export default function GoachatDemo() {
+  const [view, setView] = useState("form");
+  const [requests, setRequests] = useState([]);
+  const [ready, setReady] = useState(false);
+  const [syncError, setSyncError] = useState("");
+
+  const refresh = useCallback(async () => {
+    const list = await loadAllRequests();
+    setRequests(list);
+    setReady(true);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    try {
+      if (window.location.hash === "#admin") setView("admin");
+    } catch (e) {}
+  }, []);
+
+  const addRequest = useCallback(async (data) => {
+    const latest = await loadAllRequests();
+    const id = generateRef();
+    const now = new Date().toISOString();
+    const entry = {
+      id,
+      ...data,
+      status: "nouvelle",
+      createdAt: now,
+      updatedAt: now,
+      note: "",
+      history: [{ status: "nouvelle", at: now }],
+    };
+    const next = [entry, ...latest];
+    setRequests(next);
+    try {
+      await saveAllRequests(next);
+      setSyncError("");
+    } catch (e) {
+      setSyncError("La sauvegarde a échoué, réessaie.");
+    }
+    return id;
+  }, []);
+
+  const updateRequest = useCallback(async (id, patch) => {
+    const latest = await loadAllRequests();
+    const now = new Date().toISOString();
+    const next = latest.map((r) => {
+      if (r.id !== id) return r;
+      const updated = { ...r, ...patch, updatedAt: now };
+      if (patch.status && patch.status !== r.status) {
+        updated.history = [...(r.history || []), { status: patch.status, at: now }];
+      }
+      return updated;
+    });
+    setRequests(next);
+    try {
+      await saveAllRequests(next);
+      setSyncError("");
+    } catch (e) {
+      setSyncError("La sauvegarde a échoué, réessaie.");
+    }
+  }, []);
+
   return (
-    <div>
-      <label className="text-xs uppercase tracking-wide text-[#5C6178] body-font">{label}</label>
-      <div className="mt-2">{children}</div>
+    <div className="min-h-screen gc-body" style={{ backgroundColor: C.paper, color: C.ink }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        .gc-display { font-family: 'Oswald', sans-serif; }
+        .gc-body { font-family: 'Work Sans', sans-serif; }
+        .gc-mono { font-family: 'IBM Plex Mono', monospace; }
+        @keyframes gc-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(226,166,59,0.45);} 50% { box-shadow: 0 0 0 6px rgba(226,166,59,0);} }
+        .gc-pulse { animation: gc-pulse 2s ease-in-out infinite; }
+        @media (prefers-reduced-motion: reduce) { .gc-pulse { animation: none; } }
+        input:focus, textarea:focus, select:focus, button:focus-visible {
+          outline: 2px solid ${C.amber} !important;
+          outline-offset: 2px;
+        }
+      `}</style>
+
+      <TopNav view={view} setView={setView} />
+
+      <main className="max-w-xl mx-auto px-4 pb-10 pt-6 sm:px-6">
+        {view === "form" && <RequestForm onSubmit={addRequest} />}
+        {view === "track" && <TrackingView requests={requests} ready={ready} />}
+        {view === "admin" && (
+          <AdminView requests={requests} ready={ready} onUpdate={updateRequest} onRefresh={refresh} />
+        )}
+      </main>
+
+      <footer className="text-center pb-8 px-4">
+        <p className="text-xs" style={{ color: C.inkSoft }}>
+          Prototype Goachat — données de démonstration.
+        </p>
+      </footer>
+
+      {syncError && (
+        <div
+          className="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm gc-body flex items-center gap-2 shadow-lg"
+          style={{ backgroundColor: C.danger, color: "#fff" }}
+        >
+          <AlertCircle size={16} /> {syncError}
+        </div>
+      )}
     </div>
   );
 }
-function TextInput({ icon: IconComp, ...props }) {
-  return (
-    <div className="flex items-center gap-2 rounded-lg border px-3 py-2.5" style={{ borderColor: "#5C6178" }}>
-      {IconComp && <IconComp size={15} style={{ color: "#5C6178" }} />}
-      <input {...props} className="body-font w-full focus:outline-none bg-transparent" />
-    </div>
-  );
-}
 
-function GoachatSite() {
-  const [service, setService] = useState("colis");
-  const [destination, setDestination] = useState("ci");
-  const [prenom, setPrenom] = useState("");
-  const [nom, setNom] = useState("");
-  const [telephone, setTelephone] = useState("");
-  const [weight, setWeight] = useState(3);
-  const [colisDescription, setColisDescription] = useState("");
-  const [destPrenom, setDestPrenom] = useState("");
-  const [destNom, setDestNom] = useState("");
-  const [destTelephone, setDestTelephone] = useState("");
-  const [articleInfo, setArticleInfo] = useState("");
-  const [montantAchat, setMontantAchat] = useState(50);
-  const [devise, setDevise] = useState("EUR");
-  const [paiement, setPaiement] = useState("mobile_money");
-  const [submitted, setSubmitted] = useState(false);
+function TopNav({ view, setView }) {
+  const pressTimerRef = useRef(null);
 
-  const dest = DESTINATIONS.find((d) => d.id === destination);
-  const showColis = service !== "achat";
-  const showAchat = service !== "colis";
-
-  const montantAchatEUR = useMemo(() => {
-    const v = Math.max(montantAchat, 0);
-    return devise === "EUR" ? v : v / XOF_PEG;
-  }, [montantAchat, devise]);
-
-  const transportCost = useMemo(() => (!showColis ? 0 : Math.max(weight, 0) * RATE_PER_KG_EUR[destination]), [showColis, weight, destination]);
-  const commission = useMemo(() => (!showAchat ? 0 : montantAchatEUR * COMMISSION_RATE), [showAchat, montantAchatEUR]);
-  const achatTotal = useMemo(() => (!showAchat ? 0 : montantAchatEUR + commission), [showAchat, montantAchatEUR, commission]);
-  const total = transportCost + achatTotal;
-
-  const canSubmit = prenom.trim().length > 0 && nom.trim().length > 0 && telephone.trim().length > 5 &&
-    (!showColis || (destPrenom.trim().length > 0 && destNom.trim().length > 0 && destTelephone.trim().length > 5)) &&
-    (!showAchat || (articleInfo.trim().length > 0 && montantAchat > 0));
-
-  const waMessage = useMemo(() => {
-    const lines = [
-      `Bonjour Goachat, je souhaite passer commande.`, ``,
-      `Service : ${service === "colis" ? "Envoi de colis" : service === "achat" ? "Achat pour moi" : "Envoi de colis + Achat pour moi"}`,
-      `Pays de destination : ${dest.label} (${dest.city})`, ``,
-      `— Expéditeur —`, `Prénom : ${prenom}`, `Nom : ${nom}`, `Téléphone : ${telephone}`,
-    ];
-    if (showColis) lines.push(``, `— Colis —`, `Destinataire : ${destPrenom} ${destNom}`, `Téléphone destinataire : ${destTelephone}`, `Description : ${colisDescription || "—"}`, `Poids : ${weight} kg`);
-    if (showAchat) lines.push(``, `— Achat pour moi —`, `Article (lien ou description) : ${articleInfo || "—"}`, `Montant total : ${montantAchat} ${devise}`);
-    lines.push(``, `Paiement souhaité : ${paiement === "mobile_money" ? "Mobile Money" : "Carte bancaire"}`, `Total estimé : ${eur(total)} € (≈ ${fcfa(total)} FCFA)`);
-    return encodeURIComponent(lines.join("\n"));
-  }, [service, dest, prenom, nom, telephone, showColis, destPrenom, destNom, destTelephone, colisDescription, weight, showAchat, articleInfo, montantAchat, devise, paiement, total]);
-
-  const handleSubmit = () => {
-    if (!canSubmit) return;
-    setSubmitted(true);
-    window.open(`https://wa.me/${WHATSAPP_NUMBER}?text=${waMessage}`, "_blank");
+  const startPress = () => {
+    pressTimerRef.current = setTimeout(() => {
+      setView("admin");
+    }, 1100);
+  };
+  const cancelPress = () => {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
   };
 
   return (
-    <div className="min-h-screen w-full" style={{ background: "#F6F1E7", color: "#1C2541" }}>
-      <header className="sticky top-0 z-20 backdrop-blur border-b" style={{ background: "rgba(246,241,231,0.9)", borderColor: "#1C2541" }}>
-        <div className="max-w-5xl mx-auto px-5 py-4 flex items-center justify-between">
-          <div className="display-font text-xl font-semibold tracking-tight">GOACHAT</div>
-          <a href={`https://wa.me/${WHATSAPP_NUMBER}`} target="_blank" rel="noreferrer"
-             className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 rounded-full" style={{ background: "#1C2541", color: "#F6F1E7" }}>
-            <MessageCircle size={16} /> WhatsApp
-          </a>
+    <header style={{ backgroundColor: C.ink }} className="px-4 pt-5 pb-4 sm:px-6">
+      <div className="max-w-xl mx-auto">
+        <button
+          onMouseDown={startPress}
+          onMouseUp={cancelPress}
+          onMouseLeave={cancelPress}
+          onTouchStart={startPress}
+          onTouchEnd={cancelPress}
+          onContextMenu={(e) => e.preventDefault()}
+          className="flex items-center gap-2 mb-4"
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            cursor: "pointer",
+            WebkitTapHighlightColor: "transparent",
+            userSelect: "none",
+          }}
+          aria-label="Goachat"
+        >
+          <div
+            className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
+            style={{ backgroundColor: C.amber }}
+          >
+            <Package size={18} color={C.ink} />
+          </div>
+          <span className="gc-display text-lg" style={{ color: C.paper, letterSpacing: "0.04em" }}>
+            GOACHAT
+          </span>
+        </button>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => setView("form")}
+            className="flex-1 gc-body text-xs font-semibold py-2.5 rounded-lg leading-tight transition-colors"
+            style={{
+              backgroundColor: view === "form" ? C.amber : "rgba(255,255,255,0.08)",
+              color: view === "form" ? C.ink : C.paper,
+            }}
+          >
+            Nouvelle demande
+          </button>
+          <button
+            onClick={() => setView("track")}
+            className="flex-1 gc-body text-xs font-semibold py-2.5 rounded-lg leading-tight transition-colors"
+            style={{
+              backgroundColor: view === "track" ? C.amber : "rgba(255,255,255,0.08)",
+              color: view === "track" ? C.ink : C.paper,
+            }}
+          >
+            Suivre un colis
+          </button>
         </div>
-      </header>
+      </div>
+    </header>
+  );
+}
 
-      <section className="max-w-5xl mx-auto px-5 pt-12 pb-8">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="uppercase text-xs tracking-[0.2em] text-[#5C6178] body-font">Bordereau d'expédition</span>
-          <TrackingTicker />
+function Field({ label, required, hint, children }) {
+  return (
+    <label className="block">
+      <span className="gc-body text-sm font-semibold block mb-1.5" style={{ color: C.ink }}>
+        {label}
+        {required && <span style={{ color: C.rust }}> *</span>}
+      </span>
+      {children}
+      {hint && (
+        <span className="text-xs block mt-1.5" style={{ color: C.inkSoft }}>
+          {hint}
+        </span>
+      )}
+    </label>
+  );
+}
+
+function RequestForm({ onSubmit }) {
+  const emptyForm = {
+    type: null,
+    nom: "",
+    contact: "",
+    devise: "EUR",
+    montant: "",
+    lien: "",
+    destination: DESTINATIONS[0],
+    description: "",
+    villeDepart: "",
+    villeArrivee: "",
+    poids: "",
+  };
+  const [form, setForm] = useState(emptyForm);
+  const [submitting, setSubmitting] = useState(false);
+  const [refCode, setRefCode] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+
+  const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!form.type) {
+      setError("Choisis un type de service pour commencer.");
+      return;
+    }
+    if (!form.nom.trim() || !form.contact.trim()) {
+      setError("Merci de remplir les champs obligatoires.");
+      return;
+    }
+    if (form.type === "achat") {
+      if (!form.description.trim() || !form.montant) {
+        setError("Merci de remplir les champs obligatoires.");
+        return;
+      }
+      if (Number(form.montant) <= 0) {
+        setError("Le budget doit être supérieur à 0.");
+        return;
+      }
+    } else {
+      if (!form.description.trim() || !form.villeDepart.trim() || !form.villeArrivee.trim() || !form.poids) {
+        setError("Merci de remplir les champs obligatoires.");
+        return;
+      }
+      if (Number(form.poids) <= 0) {
+        setError("Le poids doit être supérieur à 0.");
+        return;
+      }
+    }
+    setSubmitting(true);
+    const id = await onSubmit({
+      type: form.type,
+      nom: form.nom.trim(),
+      contact: form.contact.trim(),
+      devise: form.devise,
+      montant: form.montant ? Number(form.montant) : 0,
+      lien: form.lien.trim(),
+      destination: form.destination,
+      description: form.description.trim(),
+      villeDepart: form.villeDepart.trim(),
+      villeArrivee: form.villeArrivee.trim(),
+      poids: form.poids ? Number(form.poids) : 0,
+    });
+    setSubmitting(false);
+    setRefCode(id);
+  };
+
+  const copyCode = async () => {
+    try {
+      await navigator.clipboard.writeText(refCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {}
+  };
+
+  if (refCode) {
+    return (
+      <div
+        className="rounded-2xl border-2 border-dashed p-6 text-center"
+        style={{ borderColor: C.amber, backgroundColor: C.card }}
+      >
+        <div
+          className="w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center"
+          style={{ backgroundColor: C.signal }}
+        >
+          <Check size={24} color="#fff" />
         </div>
-        <h1 className="display-font text-4xl sm:text-5xl font-semibold leading-tight max-w-2xl">
-          Envoyez. Achetez. <span style={{ color: "#A63D40" }}>On gère la route.</span>
-        </h1>
-        <p className="body-font mt-4 text-[#5C6178] max-w-xl">
-          Colis et achats entre la France et l'Afrique de l'Ouest, suivis comme un vrai fret — un tarif clair, un point de contact, une remise en main propre.
+        <h2 className="gc-display text-xl mb-1" style={{ color: C.ink }}>
+          Demande envoyée
+        </h2>
+        <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
+          Ta référence de suivi :
         </p>
-        <div className="relative mt-10 h-16 border-t-2 border-dashed" style={{ borderColor: "#C9962C" }}>
-          <div className="absolute -top-2 left-0 flex items-center gap-1 text-xs body-font font-medium"><MapPin size={14} style={{ color: "#1C2541" }} /> Paris</div>
-          <div className="absolute -top-2 right-0 flex items-center gap-1 text-xs body-font font-medium">{dest.city} <MapPin size={14} style={{ color: "#1C2541" }} /></div>
-          <Plane size={18} style={{ color: "#A63D40", position: "absolute", top: "-9px" }} className="plane-anim" />
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <span
+            className="gc-mono text-lg font-semibold px-4 py-2 rounded-lg"
+            style={{ backgroundColor: C.paperAlt, color: C.ink, letterSpacing: "0.03em" }}
+          >
+            {refCode}
+          </span>
+          <button
+            onClick={copyCode}
+            className="p-2.5 rounded-lg"
+            style={{ backgroundColor: C.paperAlt }}
+            aria-label="Copier la référence"
+          >
+            {copied ? <Check size={16} color={C.signal} /> : <Copy size={16} color={C.ink} />}
+          </button>
         </div>
-      </section>
+        <p className="text-sm mb-6 leading-relaxed" style={{ color: C.inkSoft }}>
+          On te contacte sous 24-48h avec un devis, sur WhatsApp ou par email. Garde cette référence : elle te
+          permettra de suivre ton colis.
+        </p>
+        <button
+          onClick={() => {
+            setRefCode(null);
+            setForm(emptyForm);
+          }}
+          className="gc-body text-sm font-semibold px-5 py-2.5 rounded-lg"
+          style={{ backgroundColor: C.ink, color: C.paper }}
+        >
+          Faire une autre demande
+        </button>
+      </div>
+    );
+  }
 
-      <section className="max-w-5xl mx-auto px-5 pb-16">
-        <div className="rounded-2xl overflow-hidden shadow-sm border" style={{ borderColor: "#1C2541" }}>
-          <div className="flex" style={{ background: "#1C2541" }}>
-            {[{ id: "colis", label: "Envoi de colis", icon: Package }, { id: "achat", label: "Achat pour moi", icon: ShoppingBag }, { id: "both", label: "Les deux", icon: ArrowRight }].map(({ id, label, icon: IconComp }) => (
-              <button key={id} onClick={() => setService(id)} className="flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-medium body-font transition"
-                style={{ background: service === id ? "#F6F1E7" : "transparent", color: service === id ? "#1C2541" : "#F6F1E7" }}>
-                <IconComp size={16} /> {label}
-              </button>
-            ))}
-          </div>
+  return (
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div>
+        <p className="gc-mono text-xs mb-2" style={{ color: C.rust, letterSpacing: "0.05em" }}>
+          GOACHAT · NOUVELLE DEMANDE
+        </p>
+        <h1 className="gc-display text-2xl leading-tight mb-2" style={{ color: C.ink }}>
+          Dites-nous ce qu'il vous faut.
+        </h1>
+        <p className="text-sm" style={{ color: C.inkSoft }}>
+          Achat en Europe, envoi vers la France ou vers le Bénin — choisis ton service.
+        </p>
+      </div>
 
-          <div className="grid md:grid-cols-5">
-            <div className="md:col-span-3 p-6 sm:p-8 space-y-6">
-              <Field label="Pays de destination">
-                <div className="flex gap-2">
+      <div className="space-y-2.5">
+        {SERVICE_TYPES.map((t) => {
+          const Icon = t.icon;
+          const selected = form.type === t.key;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, type: t.key }))}
+              className="w-full text-left p-4 rounded-xl border-2 flex items-start gap-3 transition-colors"
+              style={{
+                borderColor: selected ? C.amber : C.line,
+                backgroundColor: selected ? C.amberTint : C.card,
+              }}
+            >
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: selected ? C.amber : C.paperAlt }}
+              >
+                <Icon size={18} color={selected ? C.ink : C.inkSoft} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold" style={{ color: C.ink }}>
+                  {t.label}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: C.inkSoft }}>
+                  {t.blurb}
+                </p>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {form.type && (
+        <>
+          <Field label="Nom complet" required>
+            <input
+              value={form.nom}
+              onChange={set("nom")}
+              type="text"
+              required
+              className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+              style={{ borderColor: C.line, backgroundColor: C.card }}
+              placeholder="Awa Koffi"
+            />
+          </Field>
+
+          <Field label="WhatsApp ou email" required>
+            <input
+              value={form.contact}
+              onChange={set("contact")}
+              type="text"
+              required
+              className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+              style={{ borderColor: C.line, backgroundColor: C.card }}
+              placeholder="+33 6 12 34 56 78"
+            />
+          </Field>
+
+          {form.type === "achat" ? (
+            <>
+              <Field label="Lien du produit" hint="Amazon, Shein, Vinted... Pas de lien ? Décris-le ci-dessous.">
+                <input
+                  value={form.lien}
+                  onChange={set("lien")}
+                  type="text"
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder="https://..."
+                />
+              </Field>
+
+              <Field label="Description" required>
+                <textarea
+                  value={form.description}
+                  onChange={set("description")}
+                  required
+                  rows={3}
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder="Modèle, taille, couleur, quantité..."
+                />
+              </Field>
+
+              <Field label="Destination" required>
+                <select
+                  value={form.destination}
+                  onChange={set("destination")}
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                >
                   {DESTINATIONS.map((d) => (
-                    <button key={d.id} onClick={() => setDestination(d.id)} className="flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium body-font transition"
-                      style={{ borderColor: destination === d.id ? "#A63D40" : "#5C6178", background: destination === d.id ? "#FBEAEA" : "transparent", color: destination === d.id ? "#A63D40" : "#1C2541" }}>
-                      {d.label}
-                    </button>
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
                   ))}
-                </div>
+                </select>
+              </Field>
+            </>
+          ) : (
+            <>
+              <Field label={`Ville de départ (${form.type === "envoi_bj_fr" ? "Bénin" : "France"})`} required>
+                <input
+                  value={form.villeDepart}
+                  onChange={set("villeDepart")}
+                  type="text"
+                  required
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder={form.type === "envoi_bj_fr" ? "Cotonou" : "Paris"}
+                />
               </Field>
 
-              {showColis && (
-                <div className="space-y-4 rounded-xl p-4" style={{ background: "#FBF8F1" }}>
-                  <div className="tracking-font text-[11px] text-[#5C6178]">DESTINATAIRE DU COLIS</div>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <Field label="Prénom du destinataire"><TextInput icon={User} value={destPrenom} onChange={(e) => setDestPrenom(e.target.value)} placeholder="Prénom" /></Field>
-                    <Field label="Nom du destinataire"><TextInput icon={User} value={destNom} onChange={(e) => setDestNom(e.target.value)} placeholder="Nom" /></Field>
-                  </div>
-                  <Field label="Téléphone du destinataire"><TextInput icon={Phone} value={destTelephone} onChange={(e) => setDestTelephone(e.target.value)} placeholder="+225 ..." /></Field>
-                  <Field label="Description du colis"><TextInput value={colisDescription} onChange={(e) => setColisDescription(e.target.value)} placeholder="Ex : vêtements, chaussures, documents..." /></Field>
-                  <Field label="Poids estimé (kg)">
-                    <input type="number" min="0.5" step="0.5" value={weight} onChange={(e) => setWeight(parseFloat(e.target.value) || 0)}
-                      className="w-full rounded-lg border px-3 py-2.5 body-font focus:outline-none focus:ring-2" style={{ borderColor: "#5C6178" }} />
-                  </Field>
-                </div>
-              )}
-
-              {showAchat && (
-                <div className="space-y-4 rounded-xl p-4" style={{ background: "#FBF8F1" }}>
-                  <div className="tracking-font text-[11px] text-[#5C6178]">ARTICLE À ACHETER</div>
-                  <Field label="Lien de l'article ou description"><TextInput icon={LinkIcon} value={articleInfo} onChange={(e) => setArticleInfo(e.target.value)} placeholder="https://... ou description de l'article" /></Field>
-                  <div className="grid sm:grid-cols-2 gap-4">
-                    <Field label="Montant total">
-                      <input type="number" min="1" step="1" value={montantAchat} onChange={(e) => setMontantAchat(parseFloat(e.target.value) || 0)}
-                        className="w-full rounded-lg border px-3 py-2.5 body-font focus:outline-none focus:ring-2" style={{ borderColor: "#5C6178" }} />
-                    </Field>
-                    <Field label="Devise">
-                      <div className="flex gap-2">
-                        {["EUR", "FCFA"].map((d) => (
-                          <button key={d} onClick={() => setDevise(d)} className="flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium body-font transition"
-                            style={{ borderColor: devise === d ? "#1C2541" : "#5C6178", background: devise === d ? "#1C2541" : "transparent", color: devise === d ? "#F6F1E7" : "#1C2541" }}>
-                            {d}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                <div className="tracking-font text-[11px] text-[#5C6178]">TES COORDONNÉES</div>
-                <div className="grid sm:grid-cols-2 gap-4">
-                  <Field label="Prénom"><TextInput icon={User} value={prenom} onChange={(e) => setPrenom(e.target.value)} placeholder="Ton prénom" /></Field>
-                  <Field label="Nom"><TextInput icon={User} value={nom} onChange={(e) => setNom(e.target.value)} placeholder="Ton nom" /></Field>
-                </div>
-                <Field label="Téléphone / WhatsApp"><TextInput icon={Phone} value={telephone} onChange={(e) => setTelephone(e.target.value)} placeholder="06 00 00 00 00" /></Field>
-              </div>
-
-              <Field label="Paiement">
-                <div className="flex gap-2">
-                  {[{ id: "mobile_money", label: "Mobile Money" }, { id: "carte", label: "Carte bancaire" }].map((p) => (
-                    <button key={p.id} onClick={() => setPaiement(p.id)} className="flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium body-font transition"
-                      style={{ borderColor: paiement === p.id ? "#1C2541" : "#5C6178", background: paiement === p.id ? "#1C2541" : "transparent", color: paiement === p.id ? "#F6F1E7" : "#1C2541" }}>
-                      {p.label}
-                    </button>
-                  ))}
-                </div>
+              <Field label={`Ville d'arrivée (${form.type === "envoi_bj_fr" ? "France" : "Bénin"})`} required>
+                <input
+                  value={form.villeArrivee}
+                  onChange={set("villeArrivee")}
+                  type="text"
+                  required
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder={form.type === "envoi_bj_fr" ? "Paris" : "Cotonou"}
+                />
               </Field>
+
+              <Field label="Contenu du colis" required>
+                <textarea
+                  value={form.description}
+                  onChange={set("description")}
+                  required
+                  rows={3}
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder="Vêtements, documents, électronique..."
+                />
+              </Field>
+
+              <Field label="Poids estimé (kg)" required>
+                <input
+                  value={form.poids}
+                  onChange={set("poids")}
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  required
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder="5"
+                />
+              </Field>
+            </>
+          )}
+
+          <Field label="Devise" required>
+            <div className="flex gap-2">
+              {DEVISES.map((d) => {
+                const sel = form.devise === d.key;
+                return (
+                  <button
+                    key={d.key}
+                    type="button"
+                    onClick={() => setForm((f) => ({ ...f, devise: d.key }))}
+                    className="flex-1 gc-body text-sm font-semibold py-2.5 rounded-lg border-2"
+                    style={{
+                      borderColor: sel ? C.amber : C.line,
+                      backgroundColor: sel ? C.amberTint : C.card,
+                      color: C.ink,
+                    }}
+                  >
+                    {d.label}
+                  </button>
+                );
+              })}
             </div>
+          </Field>
 
-            <div className="md:col-span-2 p-6 sm:p-8 perforated border-t md:border-t-0 md:border-l" style={{ borderColor: "#1C2541" }}>
-              <div className="tracking-font text-[11px] text-[#5C6178] mb-4">ESTIMATION — {dest.label.toUpperCase()}</div>
-              <div className="space-y-2 body-font text-sm">
-                {showColis && (
-                  <div className="flex justify-between">
-                    <span className="text-[#5C6178]">Transport ({weight} kg × {eur(RATE_PER_KG_EUR[destination])} €)</span>
-                    <span className="font-medium">{eur(transportCost)} €</span>
-                  </div>
-                )}
-                {showAchat && (
-                  <>
-                    <div className="flex justify-between">
-                      <span className="text-[#5C6178]">Montant achat</span>
-                      <span className="font-medium">{montantAchat} {devise}{devise === "FCFA" && <span className="text-[#5C6178]"> (≈ {eur(montantAchatEUR)} €)</span>}</span>
-                    </div>
-                    <div className="flex justify-between"><span className="text-[#5C6178]">Commission (10%)</span><span className="font-medium">{eur(commission)} €</span></div>
-                  </>
-                )}
-              </div>
-              <div className="mt-4 pt-4 border-t" style={{ borderColor: "#1C2541" }}>
-                <div className="flex justify-between items-baseline">
-                  <span className="body-font text-sm text-[#5C6178]">Total estimé</span>
-                  <span className="display-font text-2xl font-semibold">{eur(total)} €</span>
-                </div>
-                <div className="text-right text-xs text-[#5C6178] tracking-font mt-1">≈ {fcfa(total)} FCFA</div>
-              </div>
-              <button onClick={handleSubmit} disabled={!canSubmit} className="mt-6 w-full flex items-center justify-center gap-2 rounded-lg py-3 text-sm font-semibold body-font transition"
-                style={{ background: canSubmit ? "#A63D40" : "#C9BFAE", color: "#F6F1E7", cursor: canSubmit ? "pointer" : "not-allowed" }}>
-                <MessageCircle size={16} /> Envoyer la commande via WhatsApp
-              </button>
-              {!canSubmit && <p className="text-xs text-[#5C6178] mt-2 body-font">Complète tes coordonnées{showColis ? ", celles du destinataire" : ""}{showAchat ? " et l'article à acheter" : ""} pour continuer.</p>}
-              {submitted && <p className="text-xs mt-2 body-font flex items-center gap-1" style={{ color: "#4C7A5E" }}><Check size={14} /> Ouverture de WhatsApp avec ta commande pré-remplie.</p>}
+          <Field
+            label={form.type === "achat" ? "Budget estimé" : "Valeur déclarée (optionnel)"}
+            required={form.type === "achat"}
+            hint={form.type === "achat" ? "Prix du produit en France, hors frais de service et d'expédition." : "Utile pour la douane, pas obligatoire."}
+          >
+            <input
+              value={form.montant}
+              onChange={set("montant")}
+              type="number"
+              min="0"
+              step="0.01"
+              required={form.type === "achat"}
+              className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+              style={{ borderColor: C.line, backgroundColor: C.card }}
+              placeholder={form.devise === "EUR" ? "45" : "30000"}
+            />
+            {conversionHint(form.montant, form.devise) && (
+              <span className="text-xs block mt-1.5" style={{ color: C.inkSoft }}>
+                {conversionHint(form.montant, form.devise)}
+              </span>
+            )}
+          </Field>
+
+          {error && (
+            <p className="text-sm flex items-center gap-1.5" style={{ color: C.danger }}>
+              <AlertCircle size={14} /> {error}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="gc-body w-full flex items-center justify-center gap-2 font-semibold text-sm py-3.5 rounded-lg"
+            style={{ backgroundColor: C.amber, color: C.ink, opacity: submitting ? 0.7 : 1 }}
+          >
+            {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+            {submitting ? "Envoi..." : "Envoyer la demande"}
+          </button>
+        </>
+      )}
+
+      {!form.type && error && (
+        <p className="text-sm flex items-center gap-1.5" style={{ color: C.danger }}>
+          <AlertCircle size={14} /> {error}
+        </p>
+      )}
+    </form>
+  );
+}
+
+function StatusTimeline({ stages, currentIndex }) {
+  return (
+    <div>
+      {stages.map((stage, i) => {
+        const done = i < currentIndex;
+        const active = i === currentIndex;
+        const Icon = stage.icon;
+        const isLast = i === stages.length - 1;
+        return (
+          <div key={stage.key} className="flex gap-4 relative" style={{ paddingBottom: isLast ? 0 : 28 }}>
+            {!isLast && (
+              <div
+                className="absolute w-0.5"
+                style={{
+                  left: 19,
+                  top: 40,
+                  bottom: 0,
+                  backgroundColor: done ? C.signal : "transparent",
+                  backgroundImage: done
+                    ? "none"
+                    : `repeating-linear-gradient(to bottom, ${C.line} 0, ${C.line} 4px, transparent 4px, transparent 9px)`,
+                }}
+              />
+            )}
+            <div
+              className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center border-2 z-10 ${
+                active ? "gc-pulse" : ""
+              }`}
+              style={{
+                backgroundColor: done ? C.signal : active ? C.amber : C.paper,
+                borderColor: done ? C.signal : active ? C.amber : C.line,
+              }}
+            >
+              <Icon size={17} color={done || active ? "#fff" : C.inkSoft} />
+            </div>
+            <div className="pt-2">
+              <p className="text-sm font-semibold" style={{ color: done || active ? C.ink : C.inkSoft }}>
+                {stage.label}
+              </p>
+              {active && stage.hint && (
+                <p className="text-xs mt-0.5" style={{ color: C.inkSoft }}>
+                  {stage.hint}
+                </p>
+              )}
             </div>
           </div>
-        </div>
-        <p className="text-xs text-[#5C6178] body-font mt-3">Tarifs à titre indicatif.</p>
-      </section>
-
-      <section className="max-w-5xl mx-auto px-5 pb-20">
-        <h2 className="display-font text-2xl font-semibold mb-6">Comment ça marche</h2>
-        <div className="grid sm:grid-cols-3 gap-6">
-          {[{ n: "01", title: "Tu remplis le bordereau", desc: "Tes coordonnées, celles du destinataire ou l'article à acheter — l'estimation s'affiche en direct." },
-            { n: "02", title: "On confirme sur WhatsApp", desc: "Tu reçois le prix final et les modalités de paiement." },
-            { n: "03", title: "Réception à destination", desc: "Suivi jusqu'à la remise à Abidjan ou Cotonou." }].map((s) => (
-            <div key={s.n} className="border-t pt-4" style={{ borderColor: "#1C2541" }}>
-              <div className="tracking-font text-xs text-[#C9962C] mb-2">{s.n}</div>
-              <div className="body-font font-semibold mb-1">{s.title}</div>
-              <div className="body-font text-sm text-[#5C6178]">{s.desc}</div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <footer className="border-t py-8" style={{ borderColor: "#1C2541" }}>
-        <div className="max-w-5xl mx-auto px-5 flex flex-col sm:flex-row justify-between gap-4 body-font text-sm text-[#5C6178]">
-          <div className="display-font font-semibold text-[#1C2541]">GOACHAT</div>
-          <div>Morsang-sur-Orge, France · Abidjan · Cotonou</div>
-        </div>
-      </footer>
+        );
+      })}
     </div>
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<GoachatSite />);
-</script>
-</body>
-</html>
+function TrackingView({ requests, ready }) {
+  const [query, setQuery] = useState("");
+  const [searched, setSearched] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    const found = requests.find((r) => r.id.toLowerCase() === query.trim().toLowerCase());
+    setResult(found || null);
+    setSearched(true);
+  };
+
+  const stages = result ? stagesForType(result.type) : [];
+  const currentIndex = result ? stages.findIndex((s) => s.key === result.status) : -1;
+
+  return (
+    <div>
+      <p className="gc-mono text-xs mb-2" style={{ color: C.rust, letterSpacing: "0.05em" }}>
+        GOACHAT · SUIVI
+      </p>
+      <h1 className="gc-display text-2xl mb-2" style={{ color: C.ink }}>
+        Où en est ton colis ?
+      </h1>
+      <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
+        Entre ta référence pour voir l'avancement.
+      </p>
+
+      <form onSubmit={handleSearch} className="flex gap-2 mb-8">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          type="text"
+          placeholder="GC-260714-A93F"
+          className="gc-mono flex-1 px-3.5 py-3 rounded-lg border text-sm uppercase"
+          style={{ borderColor: C.line, backgroundColor: C.card }}
+        />
+        <button
+          type="submit"
+          disabled={!ready}
+          className="px-4 py-3 rounded-lg flex items-center justify-center"
+          style={{ backgroundColor: C.ink, opacity: ready ? 1 : 0.6 }}
+        >
+          {ready ? <Search size={18} color={C.paper} /> : <Loader2 size={18} color={C.paper} className="animate-spin" />}
+        </button>
+      </form>
+
+      {searched && !result && (
+        <div className="rounded-xl p-5 flex items-start gap-3" style={{ backgroundColor: C.card, border: `1px solid ${C.line}` }}>
+          <AlertCircle size={18} style={{ color: C.rust, flexShrink: 0, marginTop: 2 }} />
+          <div>
+            <p className="text-sm font-semibold mb-1" style={{ color: C.ink }}>
+              Introuvable
+            </p>
+            <p className="text-sm" style={{ color: C.inkSoft }}>
+              Vérifie ta référence (format GC-XXXXXX-XXXX). Si le problème persiste, contacte-nous directement.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {result && (
+        <div>
+          <div className="rounded-xl p-4 mb-6" style={{ backgroundColor: C.card, border: `1px solid ${C.line}` }}>
+            <p className="gc-mono text-xs mb-1" style={{ color: C.inkSoft }}>
+              {result.id}
+            </p>
+            <p className="text-sm font-semibold mb-1" style={{ color: C.ink }}>
+              {result.description}
+            </p>
+            <p className="text-xs" style={{ color: C.inkSoft }}>
+              {summaryLine(result)} · Dernière mise à jour : {formatDateTime(result.updatedAt)}
+            </p>
+          </div>
+          <StatusTimeline stages={stages} currentIndex={currentIndex} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfoItem({ label, value }) {
+  return (
+    <div>
+      <p className="font-semibold" style={{ color: C.inkSoft }}>
+        {label}
+      </p>
+      <p style={{ color: C.ink }}>{value || "—"}</p>
+    </div>
+  );
+}
+
+function StatusBadge({ request }) {
+  const stage = STAGE_DEFS[request.status];
+  if (!stage) return null;
+  const Icon = stage.icon;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+      style={{ backgroundColor: C.paperAlt, color: C.ink }}
+    >
+      <Icon size={10} /> {stage.label}
+    </span>
+  );
+}
+
+function TypeBadge({ type }) {
+  const t = SERVICE_TYPES.find((s) => s.key === type);
+  if (!t) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold"
+      style={{ backgroundColor: C.ink, color: C.paper }}
+    >
+      {t.short}
+    </span>
+  );
+}
+
+function AdminRequestRow({ request, expanded, onToggle, onUpdate }) {
+  const [note, setNote] = useState(request.note || "");
+  const [savedFlash, setSavedFlash] = useState(false);
+  const stages = stagesForType(request.type);
+
+  const handleStatusChange = async (e) => {
+    await onUpdate(request.id, { status: e.target.value });
+    setSavedFlash(true);
+    setTimeout(() => setSavedFlash(false), 1500);
+  };
+
+  const handleNoteBlur = async () => {
+    if (note !== (request.note || "")) {
+      await onUpdate(request.id, { note });
+    }
+  };
+
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ border: `1px solid ${C.line}`, backgroundColor: C.card }}>
+      <button onClick={onToggle} className="w-full flex items-center justify-between gap-3 p-3.5 text-left">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+            <span className="gc-mono text-xs" style={{ color: C.inkSoft }}>
+              {request.id}
+            </span>
+            <TypeBadge type={request.type} />
+            <StatusBadge request={request} />
+          </div>
+          <p className="text-sm font-semibold truncate" style={{ color: C.ink }}>
+            {request.nom}
+          </p>
+          <p className="text-xs truncate" style={{ color: C.inkSoft }}>
+            {request.description}
+          </p>
+        </div>
+        <ChevronDown
+          size={18}
+          style={{ color: C.inkSoft, transform: expanded ? "rotate(180deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}
+        />
+      </button>
+
+      {expanded && (
+        <div className="px-3.5 pb-3.5 pt-1 space-y-3" style={{ borderTop: `1px solid ${C.line}` }}>
+          <div className="grid grid-cols-2 gap-3 pt-3 text-xs">
+            <InfoItem label="Contact" value={request.contact} />
+            {request.type === "achat" ? (
+              <InfoItem label="Destination" value={request.destination} />
+            ) : (
+              <>
+                <InfoItem label="Trajet" value={`${request.villeDepart} → ${request.villeArrivee}`} />
+                <InfoItem label="Poids" value={request.poids ? `${request.poids} kg` : "—"} />
+              </>
+            )}
+            <InfoItem label="Montant" value={request.montant ? formatAmount(request.montant, request.devise) : "—"} />
+            <InfoItem label="Créée le" value={formatDateTime(request.createdAt)} />
+          </div>
+          {request.type === "achat" && request.lien && (
+            <div>
+              <p className="text-xs font-semibold mb-0.5" style={{ color: C.inkSoft }}>
+                Lien produit
+              </p>
+              <a href={request.lien} target="_blank" rel="noopener noreferrer" className="text-xs break-all" style={{ color: C.rust }}>
+                {request.lien}
+              </a>
+            </div>
+          )}
+
+          <label className="block">
+            <span className="text-xs font-semibold block mb-1" style={{ color: C.inkSoft }}>
+              Statut
+            </span>
+            <select
+              value={request.status}
+              onChange={handleStatusChange}
+              className="gc-body w-full px-3 py-2 rounded-lg border text-sm"
+              style={{ borderColor: C.line, backgroundColor: C.paper }}
+            >
+              {stages.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+            {savedFlash && (
+              <p className="text-xs mt-1 flex items-center gap-1" style={{ color: C.signal }}>
+                <Check size={12} /> Enregistré
+              </p>
+            )}
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-semibold block mb-1" style={{ color: C.inkSoft }}>
+              Note interne
+            </span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onBlur={handleNoteBlur}
+              rows={2}
+              className="gc-body w-full px-3 py-2 rounded-lg border text-sm resize-none"
+              style={{ borderColor: C.line, backgroundColor: C.paper }}
+              placeholder="Visible seulement ici, pas pour le client."
+            />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ResetSection({ requests, onRefresh }) {
+  const [confirming, setConfirming] = useState(false);
+
+  if (requests.length === 0) return null;
+
+  const handleReset = async () => {
+    if (!confirming) {
+      setConfirming(true);
+      setTimeout(() => setConfirming(false), 4000);
+      return;
+    }
+    await saveAllRequests([]);
+    setConfirming(false);
+    onRefresh();
+  };
+
+  return (
+    <div className="mt-8 pt-5" style={{ borderTop: `1px solid ${C.line}` }}>
+      <button onClick={handleReset} className="text-xs font-semibold" style={{ color: confirming ? C.danger : C.inkSoft }}>
+        {confirming ? "Cliquer à nouveau pour confirmer la suppression" : "Réinitialiser les données de démo"}
+      </button>
+    </div>
+  );
+}
+
+function AdminView({ requests, ready, onUpdate, onRefresh }) {
+  const [authed, setAuthed] = useState(false);
+  const [pwd, setPwd] = useState("");
+  const [pwdError, setPwdError] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [filterType, setFilterType] = useState("toutes");
+  const [filterStatus, setFilterStatus] = useState("toutes");
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (pwd === ADMIN_PASSWORD) {
+      setAuthed(true);
+      setPwdError(false);
+    } else {
+      setPwdError(true);
+    }
+  };
+
+  if (!authed) {
+    return (
+      <div>
+        <p className="gc-mono text-xs mb-2" style={{ color: C.rust, letterSpacing: "0.05em" }}>
+          GOACHAT · ESPACE ADMIN
+        </p>
+        <div className="flex items-center gap-2 mb-5">
+          <Lock size={20} color={C.ink} />
+          <h1 className="gc-display text-2xl" style={{ color: C.ink }}>
+            Connexion
+          </h1>
+        </div>
+        <form onSubmit={handleLogin} className="space-y-3">
+          <input
+            type="password"
+            value={pwd}
+            onChange={(e) => {
+              setPwd(e.target.value);
+              setPwdError(false);
+            }}
+            placeholder="Mot de passe"
+            className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
+            style={{ borderColor: pwdError ? C.danger : C.line, backgroundColor: C.card }}
+          />
+          {pwdError && (
+            <p className="text-sm" style={{ color: C.danger }}>
+              Mot de passe incorrect.
+            </p>
+          )}
+          <button
+            type="submit"
+            className="w-full gc-body font-semibold text-sm py-3 rounded-lg"
+            style={{ backgroundColor: C.ink, color: C.paper }}
+          >
+            Entrer
+          </button>
+          <p className="text-xs pt-1" style={{ color: C.inkSoft }}>
+            Démo : mot de passe « {ADMIN_PASSWORD} ». À remplacer par une vraie authentification en production.
+          </p>
+        </form>
+      </div>
+    );
+  }
+
+  const newCount = requests.filter((r) => r.status === "nouvelle").length;
+  const sorted = [...requests].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const filtered = sorted
+    .filter((r) => filterType === "toutes" || r.type === filterType)
+    .filter((r) => filterStatus === "toutes" || r.status === filterStatus);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1">
+        <p className="gc-mono text-xs" style={{ color: C.rust, letterSpacing: "0.05em" }}>
+          GOACHAT · ESPACE ADMIN
+        </p>
+        <button onClick={onRefresh} className="p-1.5 rounded-md" style={{ backgroundColor: C.paperAlt }} aria-label="Actualiser">
+          <RefreshCw size={14} color={C.ink} />
+        </button>
+      </div>
+      <h1 className="gc-display text-2xl mb-1" style={{ color: C.ink }}>
+        Tableau de bord
+      </h1>
+      <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
+        {ready ? `${requests.length} demande${requests.length !== 1 ? "s" : ""} au total` : "Chargement..."}
+        {newCount > 0 && (
+          <span className="ml-2 px-2 py-0.5 rounded-full text-xs font-semibold" style={{ backgroundColor: C.amber, color: C.ink }}>
+            {newCount} nouvelle{newCount !== 1 ? "s" : ""}
+          </span>
+        )}
+      </p>
+
+      <div className="flex gap-1.5 mb-2.5 overflow-x-auto pb-1">
+        {["toutes", ...SERVICE_TYPES.map((t) => t.key)].map((k) => (
+          <button
+            key={k}
+            onClick={() => setFilterType(k)}
+            className="gc-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap flex-shrink-0"
+            style={{
+              backgroundColor: filterType === k ? C.ink : C.paperAlt,
+              color: filterType === k ? C.paper : C.inkSoft,
+            }}
+          >
+            {k === "toutes" ? "Tous les services" : SERVICE_TYPES.find((t) => t.key === k).short}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-1.5 mb-5 overflow-x-auto pb-1">
+        {["toutes", ...FILTER_KEYS].map((k) => (
+          <button
+            key={k}
+            onClick={() => setFilterStatus(k)}
+            className="gc-body text-xs font-semibold px-3 py-1.5 rounded-full whitespace-nowrap flex-shrink-0"
+            style={{
+              backgroundColor: filterStatus === k ? C.ink : C.paperAlt,
+              color: filterStatus === k ? C.paper : C.inkSoft,
+            }}
+          >
+            {k === "toutes" ? "Tous les statuts" : STAGE_DEFS[k].label}
+          </button>
+        ))}
+      </div>
+
+      {ready && filtered.length === 0 && (
+        <p className="text-sm py-8 text-center" style={{ color: C.inkSoft }}>
+          Aucune demande pour l'instant.
+        </p>
+      )}
+
+      <div className="space-y-2.5">
+        {filtered.map((r) => (
+          <AdminRequestRow
+            key={r.id}
+            request={r}
+            expanded={expandedId === r.id}
+            onToggle={() => setExpandedId(expandedId === r.id ? null : r.id)}
+            onUpdate={onUpdate}
+          />
+        ))}
+      </div>
+
+      <ResetSection requests={requests} onRefresh={onRefresh} />
+    </div>
+  );
+}
