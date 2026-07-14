@@ -1,4 +1,49 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Goachat — Achat & envoi de colis France ⇄ Bénin</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client",
+    "lucide-react": "https://esm.sh/lucide-react@0.383.0?external=react"
+  }
+}
+</script>
+
+<style>
+  html, body { background: #F1F2ED; }
+  body { font-family: 'Inter', sans-serif; }
+  .gc-display { font-family: 'Fraunces', serif; font-weight: 600; letter-spacing: -0.01em; }
+  .gc-body { font-family: 'Inter', sans-serif; }
+  .gc-mono { font-family: 'IBM Plex Mono', monospace; }
+
+  @keyframes gc-pulse-anim {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(226,166,59,0.45); }
+    50% { box-shadow: 0 0 0 7px rgba(226,166,59,0); }
+  }
+  .gc-pulse { animation: gc-pulse-anim 1.8s ease-in-out infinite; }
+
+  input:focus, textarea:focus, select:focus { outline: 2px solid #E2A63B; outline-offset: 1px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-type="module" data-presets="react">
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import ReactDOM from "react-dom/client";
 import {
   Package,
   Send,
@@ -37,7 +82,13 @@ const C = {
   danger: "#B3401F",
 };
 
-const STORAGE_KEY = "goachat-requests-v2";
+// ---------------------------------------------------------------------------
+// Supabase (REST via PostgREST) — remplace l'ancien window.storage de démo
+// ---------------------------------------------------------------------------
+const SUPABASE_URL = "https://bqxnylcaukulfssonnrk.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_8JGxWAnhcwDd0XkdCV55Pw_2HTQ54vW";
+const TABLE = "requests";
+
 const ADMIN_PASSWORD = "goachat2026";
 const XOF_PER_EUR = 655.957;
 
@@ -134,20 +185,112 @@ function summaryLine(r) {
   return `Trajet : ${r.villeDepart || "?"} → ${r.villeArrivee || "?"}`;
 }
 
+// --- Mapping JS (camelCase) <-> colonnes Postgres (snake_case) -------------
+function toDbRow(obj) {
+  const map = {
+    id: "id",
+    type: "type",
+    nom: "nom",
+    contact: "contact",
+    devise: "devise",
+    montant: "montant",
+    lien: "lien",
+    destination: "destination",
+    description: "description",
+    villeDepart: "ville_depart",
+    villeArrivee: "ville_arrivee",
+    poids: "poids",
+    status: "status",
+    createdAt: "created_at",
+    updatedAt: "updated_at",
+    note: "note",
+    history: "history",
+  };
+  const row = {};
+  Object.keys(obj).forEach((k) => {
+    if (map[k] !== undefined) row[map[k]] = obj[k];
+  });
+  return row;
+}
+
+function fromDbRow(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    nom: row.nom,
+    contact: row.contact,
+    devise: row.devise,
+    montant: row.montant,
+    lien: row.lien,
+    destination: row.destination,
+    description: row.description,
+    villeDepart: row.ville_depart,
+    villeArrivee: row.ville_arrivee,
+    poids: row.poids,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    note: row.note,
+    history: row.history || [],
+  };
+}
+
+async function supaFetch(path, options = {}) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: options.prefer || "return=representation",
+      ...(options.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Supabase ${res.status}: ${text}`);
+  }
+  if (res.status === 204) return null;
+  const txt = await res.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
 async function loadAllRequests() {
   try {
-    const res = await window.storage.get(STORAGE_KEY, true);
-    return res && res.value ? JSON.parse(res.value) : [];
+    const rows = await supaFetch(`${TABLE}?select=*&order=created_at.desc`);
+    return (rows || []).map(fromDbRow);
   } catch (e) {
+    console.error("loadAllRequests failed", e);
     return [];
   }
 }
 
-async function saveAllRequests(list) {
-  await window.storage.set(STORAGE_KEY, JSON.stringify(list), true);
+async function insertRequest(entry) {
+  const rows = await supaFetch(TABLE, {
+    method: "POST",
+    body: JSON.stringify(toDbRow(entry)),
+  });
+  return rows && rows[0] ? fromDbRow(rows[0]) : entry;
 }
 
-export default function GoachatDemo() {
+async function patchRequest(id, patch) {
+  const rows = await supaFetch(`${TABLE}?id=eq.${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    body: JSON.stringify(toDbRow(patch)),
+  });
+  return rows && rows[0] ? fromDbRow(rows[0]) : null;
+}
+
+async function deleteAllRequests() {
+  await supaFetch(`${TABLE}?id=not.is.null`, {
+    method: "DELETE",
+    headers: { Prefer: "return=minimal" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+
+export default function GoachatApp() {
   const [view, setView] = useState("form");
   const [requests, setRequests] = useState([]);
   const [ready, setReady] = useState(false);
@@ -170,7 +313,6 @@ export default function GoachatDemo() {
   }, []);
 
   const addRequest = useCallback(async (data) => {
-    const latest = await loadAllRequests();
     const id = generateRef();
     const now = new Date().toISOString();
     const entry = {
@@ -182,77 +324,69 @@ export default function GoachatDemo() {
       note: "",
       history: [{ status: "nouvelle", at: now }],
     };
-    const next = [entry, ...latest];
-    setRequests(next);
     try {
-      await saveAllRequests(next);
+      const inserted = await insertRequest(entry);
+      setRequests((prev) => [inserted, ...prev]);
       setSyncError("");
     } catch (e) {
-      setSyncError("La sauvegarde a échoué, réessaie.");
+      console.error(e);
+      setSyncError("L'envoi a échoué, réessaie dans un instant.");
     }
     return id;
   }, []);
 
-  const updateRequest = useCallback(async (id, patch) => {
-    const latest = await loadAllRequests();
-    const now = new Date().toISOString();
-    const next = latest.map((r) => {
-      if (r.id !== id) return r;
-      const updated = { ...r, ...patch, updatedAt: now };
-      if (patch.status && patch.status !== r.status) {
-        updated.history = [...(r.history || []), { status: patch.status, at: now }];
+  const updateRequest = useCallback(
+    async (id, patch) => {
+      const current = requests.find((r) => r.id === id);
+      const now = new Date().toISOString();
+      const patchToSend = { ...patch, updatedAt: now };
+      if (patch.status && current && patch.status !== current.status) {
+        patchToSend.history = [...(current.history || []), { status: patch.status, at: now }];
       }
-      return updated;
-    });
-    setRequests(next);
+      try {
+        const updated = await patchRequest(id, patchToSend);
+        setRequests((prev) => prev.map((r) => (r.id === id ? updated || { ...r, ...patchToSend } : r)));
+        setSyncError("");
+      } catch (e) {
+        console.error(e);
+        setSyncError("La sauvegarde a échoué, réessaie.");
+      }
+    },
+    [requests]
+  );
+
+  const resetAll = useCallback(async () => {
     try {
-      await saveAllRequests(next);
+      await deleteAllRequests();
+      setRequests([]);
       setSyncError("");
     } catch (e) {
-      setSyncError("La sauvegarde a échoué, réessaie.");
+      console.error(e);
+      setSyncError("La suppression a échoué, réessaie.");
     }
   }, []);
 
   return (
-    <div className="min-h-screen gc-body" style={{ backgroundColor: C.paper, color: C.ink }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Work+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
-        .gc-display { font-family: 'Oswald', sans-serif; }
-        .gc-body { font-family: 'Work Sans', sans-serif; }
-        .gc-mono { font-family: 'IBM Plex Mono', monospace; }
-        @keyframes gc-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(226,166,59,0.45);} 50% { box-shadow: 0 0 0 6px rgba(226,166,59,0);} }
-        .gc-pulse { animation: gc-pulse 2s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .gc-pulse { animation: none; } }
-        input:focus, textarea:focus, select:focus, button:focus-visible {
-          outline: 2px solid ${C.amber} !important;
-          outline-offset: 2px;
-        }
-      `}</style>
-
-      <TopNav view={view} setView={setView} />
-
-      <main className="max-w-xl mx-auto px-4 pb-10 pt-6 sm:px-6">
+    <div className="min-h-screen" style={{ backgroundColor: C.paper }}>
+      <div className="max-w-md mx-auto px-4 py-6">
+        <TopNav view={view} setView={setView} />
         {view === "form" && <RequestForm onSubmit={addRequest} />}
         {view === "track" && <TrackingView requests={requests} ready={ready} />}
         {view === "admin" && (
-          <AdminView requests={requests} ready={ready} onUpdate={updateRequest} onRefresh={refresh} />
+          <AdminView requests={requests} ready={ready} onUpdate={updateRequest} onRefresh={refresh} onResetAll={resetAll} />
         )}
-      </main>
-
-      <footer className="text-center pb-8 px-4">
-        <p className="text-xs" style={{ color: C.inkSoft }}>
-          Prototype Goachat — données de démonstration.
+        <p className="text-center text-xs mt-8" style={{ color: C.inkSoft }}>
+          Goachat — vos demandes sont sauvegardées en temps réel.
         </p>
-      </footer>
-
-      {syncError && (
-        <div
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-lg text-sm gc-body flex items-center gap-2 shadow-lg"
-          style={{ backgroundColor: C.danger, color: "#fff" }}
-        >
-          <AlertCircle size={16} /> {syncError}
-        </div>
-      )}
+        {syncError && (
+          <div
+            className="mt-3 p-3 rounded-lg text-xs text-center flex items-center justify-center gap-1.5"
+            style={{ backgroundColor: C.amberTint, color: C.danger }}
+          >
+            <AlertCircle size={14} /> {syncError}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -273,73 +407,69 @@ function TopNav({ view, setView }) {
   };
 
   return (
-    <header style={{ backgroundColor: C.ink }} className="px-4 pt-5 pb-4 sm:px-6">
-      <div className="max-w-xl mx-auto">
+    <div className="rounded-2xl p-4 mb-6" style={{ backgroundColor: C.ink }}>
+      <button
+        type="button"
+        onMouseDown={startPress}
+        onMouseUp={cancelPress}
+        onMouseLeave={cancelPress}
+        onTouchStart={startPress}
+        onTouchEnd={cancelPress}
+        onContextMenu={(e) => e.preventDefault()}
+        className="flex items-center gap-2 mb-4"
+        style={{
+          background: "none",
+          border: "none",
+          padding: 0,
+          cursor: "pointer",
+          WebkitTapHighlightColor: "transparent",
+          userSelect: "none",
+        }}
+        aria-label="Goachat"
+      >
+        <Package size={20} color={C.amber} />
+        <span className="gc-display text-xl tracking-tight" style={{ color: C.paper }}>
+          GOACHAT
+        </span>
+      </button>
+
+      <div className="flex gap-2">
         <button
-          onMouseDown={startPress}
-          onMouseUp={cancelPress}
-          onMouseLeave={cancelPress}
-          onTouchStart={startPress}
-          onTouchEnd={cancelPress}
-          onContextMenu={(e) => e.preventDefault()}
-          className="flex items-center gap-2 mb-4"
+          type="button"
+          onClick={() => setView("form")}
+          className="flex-1 gc-body text-xs font-semibold py-2.5 rounded-lg leading-tight transition-colors"
           style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-            cursor: "pointer",
-            WebkitTapHighlightColor: "transparent",
-            userSelect: "none",
+            backgroundColor: view === "form" ? C.amber : "rgba(255,255,255,0.08)",
+            color: view === "form" ? C.ink : C.paper,
           }}
-          aria-label="Goachat"
         >
-          <div
-            className="w-8 h-8 rounded-md flex items-center justify-center flex-shrink-0"
-            style={{ backgroundColor: C.amber }}
-          >
-            <Package size={18} color={C.ink} />
-          </div>
-          <span className="gc-display text-lg" style={{ color: C.paper, letterSpacing: "0.04em" }}>
-            GOACHAT
-          </span>
+          Nouvelle demande
         </button>
-        <div className="flex gap-1.5">
-          <button
-            onClick={() => setView("form")}
-            className="flex-1 gc-body text-xs font-semibold py-2.5 rounded-lg leading-tight transition-colors"
-            style={{
-              backgroundColor: view === "form" ? C.amber : "rgba(255,255,255,0.08)",
-              color: view === "form" ? C.ink : C.paper,
-            }}
-          >
-            Nouvelle demande
-          </button>
-          <button
-            onClick={() => setView("track")}
-            className="flex-1 gc-body text-xs font-semibold py-2.5 rounded-lg leading-tight transition-colors"
-            style={{
-              backgroundColor: view === "track" ? C.amber : "rgba(255,255,255,0.08)",
-              color: view === "track" ? C.ink : C.paper,
-            }}
-          >
-            Suivre un colis
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setView("track")}
+          className="flex-1 gc-body text-xs font-semibold py-2.5 rounded-lg leading-tight transition-colors"
+          style={{
+            backgroundColor: view === "track" ? C.amber : "rgba(255,255,255,0.08)",
+            color: view === "track" ? C.ink : C.paper,
+          }}
+        >
+          Suivre un colis
+        </button>
       </div>
-    </header>
+    </div>
   );
 }
 
 function Field({ label, required, hint, children }) {
   return (
     <label className="block">
-      <span className="gc-body text-sm font-semibold block mb-1.5" style={{ color: C.ink }}>
-        {label}
-        {required && <span style={{ color: C.rust }}> *</span>}
+      <span className="text-xs font-semibold block mb-1.5" style={{ color: C.ink }}>
+        {label} {required && <span style={{ color: C.rust }}>*</span>}
       </span>
       {children}
       {hint && (
-        <span className="text-xs block mt-1.5" style={{ color: C.inkSoft }}>
+        <span className="text-xs block mt-1" style={{ color: C.inkSoft }}>
           {hint}
         </span>
       )}
@@ -427,43 +557,33 @@ function RequestForm({ onSubmit }) {
 
   if (refCode) {
     return (
-      <div
-        className="rounded-2xl border-2 border-dashed p-6 text-center"
-        style={{ borderColor: C.amber, backgroundColor: C.card }}
-      >
-        <div
-          className="w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center"
-          style={{ backgroundColor: C.signal }}
-        >
-          <Check size={24} color="#fff" />
-        </div>
-        <h2 className="gc-display text-xl mb-1" style={{ color: C.ink }}>
+      <div className="text-center py-8">
+        <p className="gc-mono text-xs mb-2" style={{ color: C.rust, letterSpacing: "0.05em" }}>
+          GOACHAT · CONFIRMATION
+        </p>
+        <h2 className="gc-display text-2xl mb-3" style={{ color: C.ink }}>
           Demande envoyée
         </h2>
-        <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
+        <p className="text-sm mb-4" style={{ color: C.inkSoft }}>
           Ta référence de suivi :
         </p>
-        <div className="flex items-center justify-center gap-2 mb-6">
-          <span
-            className="gc-mono text-lg font-semibold px-4 py-2 rounded-lg"
-            style={{ backgroundColor: C.paperAlt, color: C.ink, letterSpacing: "0.03em" }}
-          >
+        <div
+          className="inline-flex items-center gap-2 px-4 py-3 rounded-lg mb-6"
+          style={{ backgroundColor: C.card, border: `1px solid ${C.line}` }}
+        >
+          <span className="gc-mono text-base font-semibold" style={{ color: C.ink }}>
             {refCode}
           </span>
-          <button
-            onClick={copyCode}
-            className="p-2.5 rounded-lg"
-            style={{ backgroundColor: C.paperAlt }}
-            aria-label="Copier la référence"
-          >
-            {copied ? <Check size={16} color={C.signal} /> : <Copy size={16} color={C.ink} />}
+          <button type="button" onClick={copyCode} aria-label="Copier la référence">
+            {copied ? <Check size={16} color={C.signal} /> : <Copy size={16} color={C.inkSoft} />}
           </button>
         </div>
-        <p className="text-sm mb-6 leading-relaxed" style={{ color: C.inkSoft }}>
+        <p className="text-sm mb-8 px-2" style={{ color: C.inkSoft }}>
           On te contacte sous 24-48h avec un devis, sur WhatsApp ou par email. Garde cette référence : elle te
           permettra de suivre ton colis.
         </p>
         <button
+          type="button"
           onClick={() => {
             setRefCode(null);
             setForm(emptyForm);
@@ -478,20 +598,18 @@ function RequestForm({ onSubmit }) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5">
-      <div>
-        <p className="gc-mono text-xs mb-2" style={{ color: C.rust, letterSpacing: "0.05em" }}>
-          GOACHAT · NOUVELLE DEMANDE
-        </p>
-        <h1 className="gc-display text-2xl leading-tight mb-2" style={{ color: C.ink }}>
-          Dites-nous ce qu'il vous faut.
-        </h1>
-        <p className="text-sm" style={{ color: C.inkSoft }}>
-          Achat en Europe, envoi vers la France ou vers le Bénin — choisis ton service.
-        </p>
-      </div>
+    <form onSubmit={handleSubmit}>
+      <p className="gc-mono text-xs mb-2" style={{ color: C.rust, letterSpacing: "0.05em" }}>
+        GOACHAT · NOUVELLE DEMANDE
+      </p>
+      <h1 className="gc-display text-2xl mb-2" style={{ color: C.ink }}>
+        Dites-nous ce qu'il vous faut.
+      </h1>
+      <p className="text-sm mb-5" style={{ color: C.inkSoft }}>
+        Achat en Europe, envoi vers la France ou vers le Bénin — choisis ton service.
+      </p>
 
-      <div className="space-y-2.5">
+      <div className="space-y-2.5 mb-6">
         {SERVICE_TYPES.map((t) => {
           const Icon = t.icon;
           const selected = form.type === t.key;
@@ -506,27 +624,22 @@ function RequestForm({ onSubmit }) {
                 backgroundColor: selected ? C.amberTint : C.card,
               }}
             >
-              <div
-                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ backgroundColor: selected ? C.amber : C.paperAlt }}
-              >
-                <Icon size={18} color={selected ? C.ink : C.inkSoft} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold" style={{ color: C.ink }}>
+              <Icon size={20} color={selected ? C.rust : C.inkSoft} style={{ marginTop: 2, flexShrink: 0 }} />
+              <span>
+                <span className="block text-sm font-semibold" style={{ color: C.ink }}>
                   {t.label}
-                </p>
-                <p className="text-xs mt-0.5" style={{ color: C.inkSoft }}>
+                </span>
+                <span className="block text-xs mt-0.5" style={{ color: C.inkSoft }}>
                   {t.blurb}
-                </p>
-              </div>
+                </span>
+              </span>
             </button>
           );
         })}
       </div>
 
       {form.type && (
-        <>
+        <div className="space-y-4">
           <Field label="Nom complet" required>
             <input
               value={form.nom}
@@ -535,11 +648,11 @@ function RequestForm({ onSubmit }) {
               required
               className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
               style={{ borderColor: C.line, backgroundColor: C.card }}
-              placeholder="Awa Koffi"
+              placeholder="Ton nom"
             />
           </Field>
 
-          <Field label="WhatsApp ou email" required>
+          <Field label="Contact (WhatsApp ou email)" required>
             <input
               value={form.contact}
               onChange={set("contact")}
@@ -547,24 +660,36 @@ function RequestForm({ onSubmit }) {
               required
               className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
               style={{ borderColor: C.line, backgroundColor: C.card }}
-              placeholder="+33 6 12 34 56 78"
+              placeholder="+229... ou email@exemple.com"
             />
           </Field>
 
           {form.type === "achat" ? (
             <>
-              <Field label="Lien du produit" hint="Amazon, Shein, Vinted... Pas de lien ? Décris-le ci-dessous.">
-                <input
-                  value={form.lien}
-                  onChange={set("lien")}
-                  type="text"
-                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
-                  style={{ borderColor: C.line, backgroundColor: C.card }}
-                  placeholder="https://..."
-                />
+              <Field label="Destination" required>
+                <div className="flex flex-wrap gap-2">
+                  {DESTINATIONS.map((d) => {
+                    const sel = form.destination === d;
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, destination: d }))}
+                        className="gc-body text-xs font-semibold px-3 py-2 rounded-lg border-2"
+                        style={{
+                          borderColor: sel ? C.amber : C.line,
+                          backgroundColor: sel ? C.amberTint : C.card,
+                          color: C.ink,
+                        }}
+                      >
+                        {d}
+                      </button>
+                    );
+                  })}
+                </div>
               </Field>
 
-              <Field label="Description" required>
+              <Field label="Description du produit" required hint="Modèle, taille, couleur... tout ce qui aide à identifier le bon article.">
                 <textarea
                   value={form.description}
                   onChange={set("description")}
@@ -572,28 +697,36 @@ function RequestForm({ onSubmit }) {
                   rows={3}
                   className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none"
                   style={{ borderColor: C.line, backgroundColor: C.card }}
-                  placeholder="Modèle, taille, couleur, quantité..."
+                  placeholder="Ex : sac à main Zara noir, taille unique"
                 />
               </Field>
 
-              <Field label="Destination" required>
-                <select
-                  value={form.destination}
-                  onChange={set("destination")}
+              <Field label="Lien du produit (optionnel)">
+                <input
+                  value={form.lien}
+                  onChange={set("lien")}
+                  type="url"
                   className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
                   style={{ borderColor: C.line, backgroundColor: C.card }}
-                >
-                  {DESTINATIONS.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="https://..."
+                />
               </Field>
             </>
           ) : (
             <>
-              <Field label={`Ville de départ (${form.type === "envoi_bj_fr" ? "Bénin" : "France"})`} required>
+              <Field label="Description du colis" required>
+                <textarea
+                  value={form.description}
+                  onChange={set("description")}
+                  required
+                  rows={3}
+                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none"
+                  style={{ borderColor: C.line, backgroundColor: C.card }}
+                  placeholder="Ce que contient le colis"
+                />
+              </Field>
+
+              <Field label="Ville de départ" required>
                 <input
                   value={form.villeDepart}
                   onChange={set("villeDepart")}
@@ -605,7 +738,7 @@ function RequestForm({ onSubmit }) {
                 />
               </Field>
 
-              <Field label={`Ville d'arrivée (${form.type === "envoi_bj_fr" ? "France" : "Bénin"})`} required>
+              <Field label="Ville d'arrivée" required>
                 <input
                   value={form.villeArrivee}
                   onChange={set("villeArrivee")}
@@ -614,18 +747,6 @@ function RequestForm({ onSubmit }) {
                   className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm"
                   style={{ borderColor: C.line, backgroundColor: C.card }}
                   placeholder={form.type === "envoi_bj_fr" ? "Paris" : "Cotonou"}
-                />
-              </Field>
-
-              <Field label="Contenu du colis" required>
-                <textarea
-                  value={form.description}
-                  onChange={set("description")}
-                  required
-                  rows={3}
-                  className="gc-body w-full px-3.5 py-2.5 rounded-lg border text-sm resize-none"
-                  style={{ borderColor: C.line, backgroundColor: C.card }}
-                  placeholder="Vêtements, documents, électronique..."
                 />
               </Field>
 
@@ -671,7 +792,11 @@ function RequestForm({ onSubmit }) {
           <Field
             label={form.type === "achat" ? "Budget estimé" : "Valeur déclarée (optionnel)"}
             required={form.type === "achat"}
-            hint={form.type === "achat" ? "Prix du produit en France, hors frais de service et d'expédition." : "Utile pour la douane, pas obligatoire."}
+            hint={
+              form.type === "achat"
+                ? "Prix du produit en France, hors frais de service et d'expédition."
+                : "Utile pour la douane, pas obligatoire."
+            }
           >
             <input
               value={form.montant}
@@ -706,11 +831,11 @@ function RequestForm({ onSubmit }) {
             {submitting ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
             {submitting ? "Envoi..." : "Envoyer la demande"}
           </button>
-        </>
+        </div>
       )}
 
       {!form.type && error && (
-        <p className="text-sm flex items-center gap-1.5" style={{ color: C.danger }}>
+        <p className="text-sm flex items-center gap-1.5 mt-3" style={{ color: C.danger }}>
           <AlertCircle size={14} /> {error}
         </p>
       )}
@@ -998,7 +1123,7 @@ function AdminRequestRow({ request, expanded, onToggle, onUpdate }) {
   );
 }
 
-function ResetSection({ requests, onRefresh }) {
+function ResetSection({ requests, onResetAll }) {
   const [confirming, setConfirming] = useState(false);
 
   if (requests.length === 0) return null;
@@ -1009,21 +1134,20 @@ function ResetSection({ requests, onRefresh }) {
       setTimeout(() => setConfirming(false), 4000);
       return;
     }
-    await saveAllRequests([]);
+    await onResetAll();
     setConfirming(false);
-    onRefresh();
   };
 
   return (
     <div className="mt-8 pt-5" style={{ borderTop: `1px solid ${C.line}` }}>
       <button onClick={handleReset} className="text-xs font-semibold" style={{ color: confirming ? C.danger : C.inkSoft }}>
-        {confirming ? "Cliquer à nouveau pour confirmer la suppression" : "Réinitialiser les données de démo"}
+        {confirming ? "Cliquer à nouveau pour tout supprimer" : "Supprimer toutes les demandes"}
       </button>
     </div>
   );
 }
 
-function AdminView({ requests, ready, onUpdate, onRefresh }) {
+function AdminView({ requests, ready, onUpdate, onRefresh, onResetAll }) {
   const [authed, setAuthed] = useState(false);
   const [pwd, setPwd] = useState("");
   const [pwdError, setPwdError] = useState(false);
@@ -1078,7 +1202,7 @@ function AdminView({ requests, ready, onUpdate, onRefresh }) {
             Entrer
           </button>
           <p className="text-xs pt-1" style={{ color: C.inkSoft }}>
-            Démo : mot de passe « {ADMIN_PASSWORD} ». À remplacer par une vraie authentification en production.
+            Accès protégé côté écran seulement — pense à restreindre l'accès à la base plus tard si besoin.
           </p>
         </form>
       </div>
@@ -1163,7 +1287,13 @@ function AdminView({ requests, ready, onUpdate, onRefresh }) {
         ))}
       </div>
 
-      <ResetSection requests={requests} onRefresh={onRefresh} />
+      <ResetSection requests={requests} onResetAll={onResetAll} />
     </div>
   );
 }
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<GoachatApp />);
+</script>
+</body>
+</html>
